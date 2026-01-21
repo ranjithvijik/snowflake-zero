@@ -11,49 +11,53 @@ import altair as alt
 # snowflake.snowpark.context is used to connect to Snowflake and get the active session.
 from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark import Session
-import os
 
 # --- App Setup and Data Loading ---
 
-# Get the active Snowpark session to interact with Snowflake.
-try:
-    session = get_active_session()
-except Exception:
-    # If running locally, create a new session using environment variables
-    connection_parameters = {
-        "account": os.getenv("SNOWFLAKE_ACCOUNT"),
-        "user": os.getenv("SNOWFLAKE_USER"),
-        "password": os.getenv("SNOWFLAKE_PASSWORD"),
-        "role": os.getenv("SNOWFLAKE_ROLE", "ACCOUNTADMIN"),
-        "warehouse": os.getenv("SNOWFLAKE_WAREHOUSE", "COMPUTE_WH"),
-        "database": os.getenv("SNOWFLAKE_DATABASE", "TB_101"),
-        "schema": os.getenv("SNOWFLAKE_SCHEMA", "ANALYTICS")
-    }
-    session = Session.builder.configs(connection_parameters).create()
-
-# Set the title of the Streamlit application, which appears at the top of the page.
 st.title("Menu Item Sales in Japan for February 2022")
+st.write('---')
 
-st.write('---') # Creates a divider line
+# @st.cache_resource is better for storing the database session itself
+@st.cache_resource
+def create_session():
+    """
+    1. Tries to get the active session (works inside Snowflake).
+    2. If that fails, creates a session using credentials from st.secrets (works in Streamlit Cloud).
+    """
+    try:
+        return get_active_session()
+    except Exception:
+        # If running locally or on Streamlit Cloud, use st.secrets
+        # Ensure your secrets.toml has a [connections.snowflake] section
+        if "connections" in st.secrets and "snowflake" in st.secrets["connections"]:
+            return Session.builder.configs(st.secrets["connections"]["snowflake"]).create()
+        else:
+            st.error("Missing Snowflake credentials in st.secrets")
+            return None
 
-# Define a function to load data from Snowflake.
-# @st.cache_data is a Streamlit decorator that caches the output of this function.
-# This means the data will only be fetched from Snowflake once, improving performance
-# on subsequent runs or when a user interacts with widgets.
-@st.cache_data()
+session = create_session()
+
+# --- Data Loading Function ---
+
+@st.cache_data
 def load_data():
-    """
-    Connects to a Snowflake table, fetches the data, and returns it as a Pandas DataFrame.
-    """
-    # Use the active session to reference a table in Snowflake and convert it to a Pandas DataFrame.
-    # Note: The original variable name 'germany_sales_df' was potentially confusing given the context.
+    if session:
+        # Fetch data using Snowpark
+        try:
+            # Using the full path ensures we hit the right table regardless of default schema
+            japan_sales_df = session.table("TB_101.ANALYTICS.japan_menu_item_sales_feb_2022").to_pandas()
+            return japan_sales_df
+        except Exception as e:
+            st.error(f"Error reading table: {e}")
+            return pd.DataFrame() # Return empty DF on failure
+    return pd.DataFrame()
 
-    japan_sales_df = session.table("tb_101.analytics.japan_menu_item_sales_feb_2022").to_pandas()
-    return japan_sales_df
-
-# Call the function to load the data. Thanks to caching, this will be fast after the first run. 
 japan_sales = load_data()
 
+# --- Stop Execution if Data is Empty ---
+if japan_sales.empty:
+    st.warning("No data loaded. Please check your Snowflake connection settings.")
+    st.stop()
 
 # --- User Interaction with Widgets ---
 
