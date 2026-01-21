@@ -2,3 +2,4 @@ snowflake-connector-python>=3.0.0
 pandas
 snowflake-snowpark-python[pandas]
 streamlit
+altair
