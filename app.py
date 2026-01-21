@@ -112,4 +112,4 @@ chart = alt.Chart(daily_totals).mark_line(
 
 # Render the Altair chart in the Streamlit app.
 # 'use_container_width=True' makes the chart expand to the full width of the container.
-st.altair_chart(chart, use_container_width=True)
+st.altair_chart(chart, width="stretch")
