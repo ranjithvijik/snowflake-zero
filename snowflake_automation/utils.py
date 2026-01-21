@@ -15,7 +15,7 @@ def get_connection():
 
     if not all([user, password, account]):
         print("Environment variables not set. Please enter credentials:")
-        account = account or input("Snowflake Account (e.g. xy12345.us-east-1): ")
+        account = account or input("Snowflake Account: ")
         user = user or input("Snowflake User: ")
         import getpass
         password = password or getpass.getpass("Snowflake Password: ")
