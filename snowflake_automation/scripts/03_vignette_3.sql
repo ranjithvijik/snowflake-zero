@@ -179,13 +179,3 @@ FROM
 GROUP BY
   truck_brand_name;
 
-
-/*
-  Key Insight:
-      The AI_SUMMARIZE_AGG() function condenses lengthy reviews into clear, brand-level summaries.
-      These summaries highlight recurring themes and sentiment trends, providing decision-makers
-      with quick overviews of each food truck's performance and enabling faster understanding of
-      customer perception without reading individual reviews.
-*/
-
--- End of Vignette 3
