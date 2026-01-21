@@ -1,23 +1,17 @@
 # Welcome to Streamlit in Snowflake!
 
-# Import necessary libraries
-# streamlit is used for creating the web app interface.
 import streamlit as st
-# pandas is used for data manipulation and analysis.
 import pandas as pd
-# altair is used for creating interactive data visualizations.
 import altair as alt
-# snowflake.snowpark.context is used to connect to Snowflake and get the active session.
-# snowflake.snowpark.context is used to connect to Snowflake and get the active session.
 from snowflake.snowpark.context import get_active_session
 from snowflake.snowpark import Session
+from snowflake.snowpark.functions import col, sum as sum_, count, desc
 
-# --- App Setup and Data Loading ---
+# --- App Setup and Authentication ---
 
-st.title("Menu Item Sales in Japan for February 2022")
-st.write('---')
+st.set_page_config(layout="wide")
+st.title("Tasty Bytes - Dashboard & AI Demo")
 
-# @st.cache_resource is better for storing the database session itself
 @st.cache_resource
 def create_session():
     """
@@ -28,88 +22,158 @@ def create_session():
         return get_active_session()
     except Exception:
         # If running locally or on Streamlit Cloud, use st.secrets
-        # Ensure your secrets.toml has a [connections.snowflake] section
         if "connections" in st.secrets and "snowflake" in st.secrets["connections"]:
             return Session.builder.configs(st.secrets["connections"]["snowflake"]).create()
         else:
-            st.error("Missing Snowflake credentials in st.secrets")
+            st.error("Missing Snowflake credentials in st.secrets. Please configure them to run locally.")
             return None
 
 session = create_session()
 
-# --- Data Loading Function ---
-
-@st.cache_data
-def load_data():
-    if session:
-        # Fetch data using Snowpark
-        try:
-            # Using the full path ensures we hit the right table regardless of default schema
-            japan_sales_df = session.table("TB_101.ANALYTICS.japan_menu_item_sales_feb_2022").to_pandas()
-            return japan_sales_df
-        except Exception as e:
-            st.error(f"Error reading table: {e}")
-            return pd.DataFrame() # Return empty DF on failure
-    return pd.DataFrame()
-
-japan_sales = load_data()
-
-# --- Stop Execution if Data is Empty ---
-if japan_sales.empty:
-    st.warning("No data loaded. Please check your Snowflake connection settings.")
+if not session:
     st.stop()
 
-# --- User Interaction with Widgets ---
+# --- Data Loading Functions ---
 
-# Get a unique list of menu item names from the DataFrame to populate the dropdown.
-menu_item_names = japan_sales['MENU_ITEM_NAME'].unique().tolist()
+@st.cache_data
+def load_sales_data():
+    """Fetches sales data from TB_101.ANALYTICS.ORDERS_V."""
+    try:
+        df = session.table("TB_101.ANALYTICS.ORDERS_V").select(
+            col("DATE"), 
+            col("MENU_ITEM_NAME"), 
+            col("PRIMARY_CITY"), 
+            col("ORDER_TOTAL")
+        ).to_pandas()
+        return df
+    except Exception as e:
+        st.error(f"Error reading sales data: {e}")
+        return pd.DataFrame()
 
-# Create a dropdown menu (selectbox) in the Streamlit sidebar or main page.
-# The user's selection will be stored in the 'selected_menu_item' variable.
-selected_menu_item = st.selectbox("Select a menu item", options=menu_item_names)
+@st.cache_data
+def load_reviews_data():
+    """Fetches review data from TB_101.ANALYTICS.TRUCK_REVIEWS_V."""
+    try:
+        df = session.table("TB_101.ANALYTICS.TRUCK_REVIEWS_V").select(
+            col("DATE"),
+            col("TRUCK_BRAND_NAME"),
+            col("REVIEW"),
+            col("LANGUAGE")
+        ).limit(1000).to_pandas() # Limit for performance in demo
+        return df
+    except Exception as e:
+        st.error(f"Error reading review data: {e}")
+        return pd.DataFrame()
 
+# --- Layout & Features ---
 
-# --- Data Setup ---
+tab1, tab2, tab3 = st.tabs(["📊 Sales Analysis", "💬 Customer Reviews", "🧠 Cortex AI"])
 
-# Filter the main DataFrame to include only the rows that match the user's selected menu item.
-menu_item_sales = japan_sales[japan_sales['MENU_ITEM_NAME'] == selected_menu_item]
+# --- TAB 1: Sales Analysis ---
+with tab1:
+    st.header("Sales Performance")
+    
+    sales_df = load_sales_data()
+    
+    if not sales_df.empty:
+        # 1. Total Sales by City
+        st.subheader("Total Sales by City")
+        city_sales = sales_df.groupby('PRIMARY_CITY')['ORDER_TOTAL'].sum().reset_index()
+        
+        city_chart = alt.Chart(city_sales).mark_bar().encode(
+            x=alt.X('ORDER_TOTAL:Q', title='Total Sales ($)'),
+            y=alt.Y('PRIMARY_CITY:N', sort='-x', title='City'),
+            tooltip=['PRIMARY_CITY', 'ORDER_TOTAL']
+        ).properties(height=400)
+        st.altair_chart(city_chart, use_container_width=True)
 
-# Group the filtered data by 'DATE' and calculate the sum of 'ORDER_TOTAL' for each day. 
-daily_totals = menu_item_sales.groupby('DATE')['ORDER_TOTAL'].sum().reset_index()
+        col1, col2 = st.columns(2)
+        
+        with col1:
+             # 2. Daily Sales Trend
+            st.subheader("Daily Sales Trend")
+            daily_sales = sales_df.groupby('DATE')['ORDER_TOTAL'].sum().reset_index()
+            daily_chart = alt.Chart(daily_sales).mark_line(point=True).encode(
+                x=alt.X('DATE:T', title='Date'),
+                y=alt.Y('ORDER_TOTAL:Q', title='Sales ($)'),
+                tooltip=['DATE', 'ORDER_TOTAL']
+            ).properties(height=300)
+            st.altair_chart(daily_chart, use_container_width=True)
+            
+        with col2:
+            # 3. Top Menu Items
+            st.subheader("Top 10 Menu Items")
+            top_items = sales_df.groupby('MENU_ITEM_NAME')['ORDER_TOTAL'].sum().reset_index().nlargest(10, 'ORDER_TOTAL')
+            item_chart = alt.Chart(top_items).mark_bar().encode(
+                x=alt.X('ORDER_TOTAL:Q', title='Total Sales ($)'),
+                y=alt.Y('MENU_ITEM_NAME:N', sort='-x', title='Menu Item'),
+                tooltip=['MENU_ITEM_NAME', 'ORDER_TOTAL']
+            ).properties(height=300)
+            st.altair_chart(item_chart, use_container_width=True)
+    else:
+        st.info("No sales data available.")
 
+# --- TAB 2: Customer Reviews ---
+with tab2:
+    st.header("Customer Feedback")
+    
+    reviews_df = load_reviews_data()
+    
+    if not reviews_df.empty:
+        col1, col2 = st.columns([1, 2])
+        
+        with col1:
+            # 1. Reviews by Brand
+            st.subheader("Reviews by Brand")
+            brand_counts = reviews_df['TRUCK_BRAND_NAME'].value_counts().reset_index()
+            brand_counts.columns = ['Brand', 'Count']
+            
+            brand_chart = alt.Chart(brand_counts).mark_bar().encode(
+                x=alt.X('Count:Q', title='Number of Reviews'),
+                y=alt.Y('Brand:N', sort='-x', title='Truck Brand'),
+                color='Brand',
+                tooltip=['Brand', 'Count']
+            ).properties(height=400)
+            st.altair_chart(brand_chart, use_container_width=True)
+            
+        with col2:
+            # 2. Recent Reviews Data Grid
+            st.subheader("Recent Reviews")
+            st.dataframe(reviews_df[['DATE', 'TRUCK_BRAND_NAME', 'REVIEW']].head(50), use_container_width=True)
+    else:
+        st.info("No review data available.")
 
-# --- Chart Setup ---
-
-# Calculate the range of sales values to set a dynamic y-axis scale.
-min_value = daily_totals['ORDER_TOTAL'].min()
-max_value = daily_totals['ORDER_TOTAL'].max()
-
-# Calculate a margin to add above and below the min/max values on the chart.
-chart_margin = (max_value - min_value) / 2
-y_margin_min = min_value - chart_margin
-y_margin_max = max_value + chart_margin
-
-# Create a line chart.
-chart = alt.Chart(daily_totals).mark_line(
-    point=True,     
-    tooltip=True
-).encode(
-    x=alt.X('DATE:T',
-            axis=alt.Axis(title='Date', format='%b %d'),
-            title='Date'),
-    y=alt.Y('ORDER_TOTAL:Q',
-            axis=alt.Axis(title='Total Sales ($)'), 
-            title='Total Daily Sales',
-# Set a custom domain (range) for the y-axis to add padding dynamically. 
-            scale=alt.Scale(domain=[y_margin_min, y_margin_max]))
-).properties(
-    title=f'Total Daily Sales for Menu Item: {selected_menu_item}',
-    height=500
-)
-
-
-# --- Displaying the Chart ---
-
-# Render the Altair chart in the Streamlit app.
-# 'use_container_width=True' makes the chart expand to the full width of the container.
-st.altair_chart(chart, width="stretch")
+# --- TAB 3: Cortex AI ---
+with tab3:
+    st.header("Snowflake Cortex AI Demo")
+    st.markdown("""
+    Context: Use **Snowflake Cortex** to instantly analyze sentiment. 
+    Enter a hypothetical review below to see how the AI scores it (-1 to 1).
+    """)
+    
+    user_input = st.text_area("Enter a food truck review:", placeholder="The tacos were amazing but the line was too long!")
+    
+    if user_input:
+        if st.button("Analyze Sentiment"):
+            try:
+                # Use Snowflake Cortex SQL Function
+                # Note: We use execute_string or just sql() to run the query
+                # Escaping single quotes in user input is important for SQL injection prevention in prod, 
+                # but for this demo using parameterized query or simple replacement is okay.
+                safe_input = user_input.replace("'", "''") 
+                query = f"SELECT SNOWFLAKE.CORTEX.SENTIMENT('{safe_input}') AS SENTIMENT_SCORE"
+                
+                result = session.sql(query).collect()
+                score = result[0]['SENTIMENT_SCORE']
+                
+                st.metric(label="Sentiment Score", value=f"{score:.2f}")
+                
+                if score > 0.2:
+                    st.success("Positive Feedback! 😊")
+                elif score < -0.2:
+                    st.error("Negative Feedback 😞")
+                else:
+                    st.warning("Neutral Feedback 😐")
+                    
+            except Exception as e:
+                st.error(f"Error running Cortex AI: {e}")
