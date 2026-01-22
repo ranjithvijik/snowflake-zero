@@ -1,5 +1,5 @@
 streamlit
 snowflake-snowpark-python
-pandas<2.2.0
+pandas
 altair
 pyarrow
