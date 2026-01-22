@@ -7,7 +7,7 @@ from snowflake.snowpark.functions import col, sum as sum_, desc, count
 
 # --- App Setup and Authentication ---
 st.set_page_config(layout="wide")
-st.title("Tasty Bytes - Dashboard & AI Demo")
+st.title("Tasty Bytes")
 
 @st.cache_resource
 def create_session():
@@ -252,6 +252,11 @@ with tab4:
     
     safe_input = user_input.replace("'", "''") if user_input else ""
     
+    # Display target language option if Translation is selected
+    target_lang = "es"
+    if ai_choice == "Translation":
+        target_lang = st.selectbox("Target Language", ["es", "fr", "de", "it", "ja", "ko"])
+
     if st.button("Run AI"):
         if not user_input:
             st.warning("Please enter some text first.")
@@ -266,7 +271,7 @@ with tab4:
                     else: st.warning("Neutral")
 
                 elif ai_choice == "Translation":
-                    target_lang = st.selectbox("Target Language", ["es", "fr", "de", "it", "ja", "ko"])
+                    # Uses the target_lang selected above
                     query = f"SELECT SNOWFLAKE.CORTEX.TRANSLATE('{safe_input}', 'en', '{target_lang}') AS VAL"
                     val = session.sql(query).collect()[0]['VAL']
                     st.subheader("Translation:")
