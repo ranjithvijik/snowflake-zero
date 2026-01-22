@@ -112,21 +112,50 @@ def get_recent_reviews():
         st.error(f"Error fetching recent reviews: {e}")
         return pd.DataFrame()
 
+@st.cache_data
+def get_loyalty_demographics():
+    """Aggregates sales by marital status and gender."""
+    try:
+        # Using ORDERS_V as it contains joined loyalty info + sales
+        df = (
+            session.table("TB_101.ANALYTICS.ORDERS_V")
+            .filter(col("MARITAL_STATUS").is_not_null())
+            .group_by("MARITAL_STATUS")
+            .agg(sum_("ORDER_TOTAL").alias("TOTAL_SALES"))
+        ).to_pandas()
+        return df
+    except Exception as e:
+        st.error(f"Error fetching demographics: {e}")
+        return pd.DataFrame()
+
+@st.cache_data
+def get_top_customers():
+    """Fetches top 10 customers by lifetime spend."""
+    try:
+        df = (
+            session.table("TB_101.ANALYTICS.CUSTOMER_LOYALTY_METRICS_V")
+            .select("FIRST_NAME", "LAST_NAME", "CITY", "TOTAL_SALES")
+            .sort(desc("TOTAL_SALES"))
+            .limit(10)
+        ).to_pandas()
+        return df
+    except Exception as e:
+        st.error(f"Error fetching top customers: {e}")
+        return pd.DataFrame()
+
 # --- Layout & Features ---
 
-tab1, tab2, tab3 = st.tabs(["📊 Sales Analysis", "💬 Customer Reviews", "🧠 Cortex AI"])
+tab1, tab2, tab3, tab4 = st.tabs(["📊 Sales", "🏆 Loyalty", "💬 Reviews", "🧠 Cortex AI"])
 
 # --- TAB 1: Sales Analysis ---
 with tab1:
     st.header("Sales Performance")
     
-    # Load Summary Data
     city_sales_df = get_city_sales()
     daily_sales_df = get_daily_sales()
     top_items_df = get_top_items()
 
     if not city_sales_df.empty:
-        # 1. Total Sales by City
         st.subheader("Total Sales by City")
         city_chart = alt.Chart(city_sales_df).mark_bar().encode(
             x=alt.X('ORDER_TOTAL:Q', title='Total Sales ($)'),
@@ -136,9 +165,7 @@ with tab1:
         st.altair_chart(city_chart, use_container_width=True)
 
         col1, col2 = st.columns(2)
-
         with col1:
-             # 2. Daily Sales Trend
             st.subheader("Daily Sales Trend")
             if not daily_sales_df.empty:
                 daily_chart = alt.Chart(daily_sales_df).mark_line(point=True).encode(
@@ -149,7 +176,6 @@ with tab1:
                 st.altair_chart(daily_chart, use_container_width=True)
 
         with col2:
-            # 3. Top Menu Items
             st.subheader("Top 10 Menu Items")
             if not top_items_df.empty:
                 item_chart = alt.Chart(top_items_df).mark_bar().encode(
@@ -161,8 +187,34 @@ with tab1:
     else:
         st.info("No sales data available.")
 
-# --- TAB 2: Customer Reviews ---
+# --- TAB 2: Loyalty Analytics ---
 with tab2:
+    st.header("Loyalty Program Insights")
+    
+    demo_df = get_loyalty_demographics()
+    top_cust_df = get_top_customers()
+    
+    if not demo_df.empty:
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            st.subheader("Sales by Marital Status")
+            donut = alt.Chart(demo_df).mark_arc(innerRadius=50).encode(
+                theta=alt.Theta("TOTAL_SALES", stack=True),
+                color=alt.Color("MARITAL_STATUS"),
+                tooltip=["MARITAL_STATUS", "TOTAL_SALES"]
+            ).properties(height=350)
+            st.altair_chart(donut, use_container_width=True)
+            
+        with col2:
+            st.subheader("Top 10 VIP Customers")
+            st.dataframe(top_cust_df, use_container_width=True, hide_index=True)
+            
+    else:
+        st.info("No loyalty data available.")
+
+# --- TAB 3: Customer Reviews ---
+with tab3:
     st.header("Customer Feedback")
     
     brand_counts_df = get_reviews_by_brand()
@@ -173,7 +225,6 @@ with tab2:
         
         with col1:
             st.subheader("Reviews by Brand")
-            
             brand_chart = alt.Chart(brand_counts_df).mark_bar().encode(
                 x=alt.X('COUNT:Q', title='Number of Reviews'),
                 y=alt.Y('TRUCK_BRAND_NAME:N', sort='-x', title='Truck Brand'),
@@ -188,33 +239,50 @@ with tab2:
     else:
         st.info("No review data available.")
 
-# --- TAB 3: Cortex AI ---
-with tab3:
-    st.header("Snowflake Cortex AI Demo")
-    st.markdown("""
-    Context: Use **Snowflake Cortex** to instantly analyze sentiment. 
-    Enter a hypothetical review below to see how the AI scores it (-1 to 1).
-    """)
+# --- TAB 4: Cortex AI Playground ---
+with tab4:
+    st.header("🧠 Cortex AI Playground")
+    st.markdown("Experience the power of Snowflake Cortex AI functions directly on your data.")
     
-    user_input = st.text_area("Enter a food truck review:", placeholder="The tacos were amazing but the line was too long!")
+    ai_choice = st.selectbox("Select AI Capability:", 
+                             ["Sentiment Analysis", "Translation", "Summarization", "Idea Extraction"])
     
-    if user_input:
-        if st.button("Analyze Sentiment"):
+    user_input = st.text_area("Input Text (e.g., a review):", height=100,
+                              placeholder="The burgers were delicious but the service was a bit slow.")
+    
+    safe_input = user_input.replace("'", "''") if user_input else ""
+    
+    if st.button("Run AI"):
+        if not user_input:
+            st.warning("Please enter some text first.")
+        else:
             try:
-                # Escaping single quotes for basic SQL safety in demo
-                safe_input = user_input.replace("'", "''") 
-                query = f"SELECT SNOWFLAKE.CORTEX.SENTIMENT('{safe_input}') AS SENTIMENT_SCORE"
-                
-                result = session.sql(query).collect()
-                score = result[0]['SENTIMENT_SCORE']
-                
-                st.metric(label="Sentiment Score", value=f"{score:.2f}")
-                
-                if score > 0.2:
-                    st.success("Positive Feedback! 😊")
-                elif score < -0.2:
-                    st.error("Negative Feedback 😞")
-                else:
-                    st.warning("Neutral Feedback 😐")
+                if ai_choice == "Sentiment Analysis":
+                    query = f"SELECT SNOWFLAKE.CORTEX.SENTIMENT('{safe_input}') AS VAL"
+                    val = session.sql(query).collect()[0]['VAL']
+                    st.metric("Sentiment Score (-1 to 1)", f"{val:.2f}")
+                    if val > 0.2: st.success("Positive")
+                    elif val < -0.2: st.error("Negative")
+                    else: st.warning("Neutral")
+
+                elif ai_choice == "Translation":
+                    target_lang = st.selectbox("Target Language", ["es", "fr", "de", "it", "ja", "ko"])
+                    query = f"SELECT SNOWFLAKE.CORTEX.TRANSLATE('{safe_input}', 'en', '{target_lang}') AS VAL"
+                    val = session.sql(query).collect()[0]['VAL']
+                    st.subheader("Translation:")
+                    st.write(val)
+                    
+                elif ai_choice == "Summarization":
+                    query = f"SELECT SNOWFLAKE.CORTEX.SUMMARIZE('{safe_input}') AS VAL"
+                    val = session.sql(query).collect()[0]['VAL']
+                    st.subheader("Summary:")
+                    st.write(val)
+
+                elif ai_choice == "Idea Extraction":
+                    query = f"SELECT SNOWFLAKE.CORTEX.EXTRACT_ANSWER('{safe_input}', 'What was good and what was bad?') AS VAL"
+                    val = session.sql(query).collect()[0]['VAL']
+                    st.subheader("Key Points:")
+                    st.write(val)
+                    
             except Exception as e:
-                st.error(f"Error running Cortex AI: {e}")
+                 st.error(f"Error running Cortex AI: {e}")
