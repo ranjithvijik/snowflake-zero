@@ -241,8 +241,7 @@ with tab3:
 
 # --- TAB 4: Cortex AI Playground ---
 with tab4:
-    st.header("🧠 Cortex AI Playground")
-    st.markdown("Experience the power of Snowflake Cortex AI functions directly on your data.")
+    st.header("🧠 Cortex AI")
     
     ai_choice = st.selectbox("Select AI Capability:", 
                              ["Sentiment Analysis", "Translation", "Summarization", "Idea Extraction"])
